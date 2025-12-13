@@ -87,6 +87,7 @@ void benchmark_distance_functions(void) {
     printf("Euclidean distance (%d iterations): %.2f ms\n", iterations, end - start);
     
     /* Benchmark Manhattan distance */
+    result = 0.0f;  /* Reset result for accurate benchmarking */
     start = get_time_ms();
     for (int i = 0; i < iterations; i++) {
         result += manhattan_dist(a, b, BENCHMARK_DIM);

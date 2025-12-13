@@ -219,8 +219,9 @@ void collect_sets(KNNGraph graph, uint32_t **old,
 		/* Sample from flagged nodes using Fisher-Yates shuffle */
 		uint32_t true_cnt = vector_size(flagged_indices);
 		uint32_t to_sample = MIN(sample_rate * graph->k, true_cnt);
+		uint32_t seed = v + time(NULL);
 		for (uint32_t i = 0; i < to_sample; ++i) {
-			uint32_t j = i + rand() % (true_cnt - i);
+			uint32_t j = i + rand_r(&seed) % (true_cnt - i);
 			uint32_t temp = flagged_indices[i];
 			flagged_indices[i] = flagged_indices[j];
 			flagged_indices[j] = temp;
