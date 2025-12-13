@@ -127,7 +127,7 @@ void graph_init(KNNGraph graph) {
 		}
 		
 		/* Use Fisher-Yates to select k random neighbors */
-		uint32_t seed = i + time(NULL);
+		uint32_t seed = i + time(NULL) + omp_get_thread_num() * 1000;
 		for (uint32_t j = 0; j < graph->k && j < vector_size(candidates); ++j) {
 			uint32_t idx = j + rand_r(&seed) % (vector_size(candidates) - j);
 			uint32_t temp = candidates[j];
@@ -219,7 +219,7 @@ void collect_sets(KNNGraph graph, uint32_t **old,
 		/* Sample from flagged nodes using Fisher-Yates shuffle */
 		uint32_t true_cnt = vector_size(flagged_indices);
 		uint32_t to_sample = MIN(sample_rate * graph->k, true_cnt);
-		uint32_t seed = v + time(NULL);
+		uint32_t seed = v + time(NULL) + omp_get_thread_num() * 1000;
 		for (uint32_t i = 0; i < to_sample; ++i) {
 			uint32_t j = i + rand_r(&seed) % (true_cnt - i);
 			uint32_t temp = flagged_indices[i];
@@ -242,8 +242,9 @@ Pair *collect_pairs(uint32_t *old, uint32_t *new) {
 
 	for (size_t i = 0UL; i < new_size; ++i) {
 		pairs[i].id = new[i];
-		/* Pre-allocate enough space to avoid repeated reallocation */
-		uint32_t estimated_neighbors = old_size + new_size;
+		/* Pre-allocate enough space to avoid repeated reallocation
+		 * Estimate: ~half of new (due to id >= u2 filter) + all of old (minus ~1) */
+		uint32_t estimated_neighbors = old_size + (new_size / 2);
 		pairs[i].neighbors = vector_create(Neighbor, estimated_neighbors > VEC_MIN_CAP ? estimated_neighbors : VEC_MIN_CAP);
 		
 		for (size_t j = 0UL; j < new_size; ++j) {
