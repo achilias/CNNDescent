@@ -87,3 +87,19 @@ int main(void) {
     printf("\n");
 
 }
+```
+
+## Performance
+
+CNNDescent has been optimized for fast index build times with several key improvements:
+
+- **Fisher-Yates sampling** for O(k) complexity instead of O(k*log(n)) rejection sampling
+- **Loop-unrolled distance functions** for better SIMD vectorization
+- **Architecture-specific optimizations** via `-march=native` compiler flag
+- **Pre-allocated memory** to reduce reallocation overhead
+
+Benchmark results (1000 points, 128 dimensions, k=10):
+- Euclidean distance: ~125ms build time
+- Manhattan distance: ~120ms build time
+
+For detailed information about optimizations, see [OPTIMIZATIONS.md](OPTIMIZATIONS.md).
