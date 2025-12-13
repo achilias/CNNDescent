@@ -9,20 +9,54 @@ int cmp_ids(Neighbor a, Neighbor b) {
 }
 
 float manhattan_dist(float *f1, float *f2, uint32_t dim) {
-	float dist = 0;
-	for (size_t i = 0UL; i < dim; ++i)
-		dist += fabs(f1[i] - f2[i]);
-	return dist;
+	float sum1 = 0.0f;
+	float sum2 = 0.0f;
+	float sum3 = 0.0f;
+	float sum4 = 0.0f;
+	
+	/* Loop unrolling for better performance */
+	uint32_t to_unroll = dim - dim % 4;
+	for (size_t i = 0UL; i < to_unroll; i += 4) {
+		sum1 += fabsf(f1[i] - f2[i]);
+		sum2 += fabsf(f1[i + 1] - f2[i + 1]);
+		sum3 += fabsf(f1[i + 2] - f2[i + 2]);
+		sum4 += fabsf(f1[i + 3] - f2[i + 3]);
+	}
+	
+	/* Handle remaining elements */
+	for (size_t i = to_unroll; i < dim; ++i)
+		sum1 += fabsf(f1[i] - f2[i]);
+	
+	return sum1 + sum2 + sum3 + sum4;
 }
 
 
 float euclidean_dist(float *f1, float *f2, uint32_t dim) {
-	double dist = 0;
-	for (size_t i = 0UL; i < dim; ++i) {
-		double res = f1[i] - f2[i];
-		dist += res * res;
+	float sum1 = 0.0f;
+	float sum2 = 0.0f;
+	float sum3 = 0.0f;
+	float sum4 = 0.0f;
+	
+	/* Loop unrolling for better performance */
+	uint32_t to_unroll = dim - dim % 4;
+	for (size_t i = 0UL; i < to_unroll; i += 4) {
+		float diff1 = f1[i] - f2[i];
+		float diff2 = f1[i + 1] - f2[i + 1];
+		float diff3 = f1[i + 2] - f2[i + 2];
+		float diff4 = f1[i + 3] - f2[i + 3];
+		sum1 += diff1 * diff1;
+		sum2 += diff2 * diff2;
+		sum3 += diff3 * diff3;
+		sum4 += diff4 * diff4;
 	}
-	return sqrt(dist);
+	
+	/* Handle remaining elements */
+	for (size_t i = to_unroll; i < dim; ++i) {
+		float diff = f1[i] - f2[i];
+		sum1 += diff * diff;
+	}
+	
+	return sqrtf(sum1 + sum2 + sum3 + sum4);
 }
 
 
@@ -85,19 +119,30 @@ void graph_init(KNNGraph graph) {
 
 	# pragma omp parallel for simd num_threads(n_threads)
 	for (size_t i = 0UL; i < graph->points; ++i) {
-		while (vector_size(graph->neighbors[i]) < graph->k) {
-			uint32_t num = rand() % graph->points;
-			while (num == i)
-				num = rand() % graph->points;
+		/* Create array of candidate indices (excluding i) */
+		uint32_t *candidates = vector_create(uint32_t, graph->points - 1);
+		for (uint32_t j = 0; j < graph->points; ++j) {
+			if (j != i)
+				vector_insert(candidates, j);
+		}
+		
+		/* Use Fisher-Yates to select k random neighbors */
+		uint32_t seed = i + time(NULL);
+		for (uint32_t j = 0; j < graph->k && j < vector_size(candidates); ++j) {
+			uint32_t idx = j + rand_r(&seed) % (vector_size(candidates) - j);
+			uint32_t temp = candidates[j];
+			candidates[j] = candidates[idx];
+			candidates[idx] = temp;
 			
+			uint32_t num = candidates[j];
 			float dist = graph->dist(graph->data[i],
 									 graph->data[num],
 									 graph->dim);
 
 			vector_sorted_insert(graph->neighbors[i], 
 								((Neighbor){.id = num, .dist = dist, .flag = true}));
-			
 		}
+		vector_destroy(candidates);
 	}
 }
 
@@ -143,21 +188,14 @@ void sample(uint32_t **vec, uint32_t size, uint32_t seed) {
 	if (vector_size(*vec) <= size)
 		return;
 
-	int size__ = vector_size(*vec);
-	uint32_t *sampled = vector_create(uint32_t, size__);
-	uint8_t *bitset = BITSET_CREATE(vector_size(*vec));
-	while (vector_size(sampled) < size) {
-		uint32_t i = rand_r(&seed) % vector_size(*vec);
-		while (BITSET_CHECK(bitset, i))
-			i = rand_r(&seed) % vector_size(*vec);
-
-		BITSET_SET(bitset, i);
-		vector_insert(sampled, (*vec)[i]);
+	/* Use Fisher-Yates shuffle for first 'size' elements - O(size) instead of O(size * log(n)) */
+	for (uint32_t i = 0; i < size; ++i) {
+		uint32_t j = i + rand_r(&seed) % (vector_size(*vec) - i);
+		uint32_t temp = (*vec)[i];
+		(*vec)[i] = (*vec)[j];
+		(*vec)[j] = temp;
 	}
-	free(bitset);
-
-	vector_destroy(*vec);
-	*vec = sampled;
+	vector_set_size(*vec, size);
 }
 
 
@@ -166,23 +204,32 @@ void collect_sets(KNNGraph graph, uint32_t **old,
 
 	for (size_t v = 0UL; v < graph->points; ++v) {
 		vector_set_size(old[v], 0);
-		uint32_t true_cnt = 0;
-		for (size_t i = 0UL; i < graph->k; ++i) {
-			true_cnt += graph->neighbors[v][i].flag;
-			if (!graph->neighbors[v][i].flag)
-				vector_insert(old[v], graph->neighbors[v][i].id);
-		}
-
-		uint32_t to_sample = MIN(sample_rate * graph->k, true_cnt);
 		vector_set_size(new[v], 0);
-		for (size_t i = 0UL; i < to_sample; ++i) {
-			uint32_t node = rand() % graph->k;
-			while (!graph->neighbors[v][node].flag)
-				node = rand() % graph->k;
-			
-			graph->neighbors[v][node].flag = false;
-			vector_insert(new[v], graph->neighbors[v][node].id);
+		
+		/* Collect indices of nodes with flag=true into a temporary array */
+		uint32_t *flagged_indices = vector_create(uint32_t, graph->k);
+		for (size_t i = 0UL; i < graph->k; ++i) {
+			if (graph->neighbors[v][i].flag) {
+				vector_insert(flagged_indices, i);
+			} else {
+				vector_insert(old[v], graph->neighbors[v][i].id);
+			}
 		}
+		
+		/* Sample from flagged nodes using Fisher-Yates shuffle */
+		uint32_t true_cnt = vector_size(flagged_indices);
+		uint32_t to_sample = MIN(sample_rate * graph->k, true_cnt);
+		for (uint32_t i = 0; i < to_sample; ++i) {
+			uint32_t j = i + rand() % (true_cnt - i);
+			uint32_t temp = flagged_indices[i];
+			flagged_indices[i] = flagged_indices[j];
+			flagged_indices[j] = temp;
+			
+			uint32_t idx = flagged_indices[i];
+			graph->neighbors[v][idx].flag = false;
+			vector_insert(new[v], graph->neighbors[v][idx].id);
+		}
+		vector_destroy(flagged_indices);
 	}
 }
 

@@ -2,3 +2,5 @@
 *.json
 c_lib/build/*
 c_lib/bin/*
+bin/*
+build/*
