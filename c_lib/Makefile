@@ -5,7 +5,7 @@ BUILD_DIR   	:= ./build
 BIN_DIR     	:= ./bin
 SRC				:= ../src
 
-CFLAGS	  	:= -I$(INCLUDE) -Wall -O3 -Werror -std=c11 -fPIC
+CFLAGS	  	:= -I$(INCLUDE) -Wall -O3 -Werror -std=c11 -fPIC -march=native -ffast-math
 LIB_FLAGS	:= -lm -fopenmp --shared
 
 LIB_OBJ = libknngraph.so

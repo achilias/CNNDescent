@@ -236,11 +236,16 @@ void collect_sets(KNNGraph graph, uint32_t **old,
 
 Pair *collect_pairs(uint32_t *old, uint32_t *new) {
 	Pair *pairs = malloc(vector_size(new) * sizeof(Pair));
+	uint32_t old_size = vector_size(old);
+	uint32_t new_size = vector_size(new);
 
-	for (size_t i = 0UL; i < vector_size(new); ++i) {
+	for (size_t i = 0UL; i < new_size; ++i) {
 		pairs[i].id = new[i];
-		pairs[i].neighbors = vector_create(Neighbor, VEC_MIN_CAP);
-		for (size_t j = 0UL; j < vector_size(new); ++j) {
+		/* Pre-allocate enough space to avoid repeated reallocation */
+		uint32_t estimated_neighbors = old_size + new_size;
+		pairs[i].neighbors = vector_create(Neighbor, estimated_neighbors > VEC_MIN_CAP ? estimated_neighbors : VEC_MIN_CAP);
+		
+		for (size_t j = 0UL; j < new_size; ++j) {
 			uint32_t u2 = new[j];
 			if (pairs[i].id >= u2)
 				continue;
@@ -248,7 +253,7 @@ Pair *collect_pairs(uint32_t *old, uint32_t *new) {
 			vector_insert(pairs[i].neighbors, ((Neighbor){.id = u2}));
 		}
 
-		for (size_t j = 0UL; j < vector_size(old); ++j) {
+		for (size_t j = 0UL; j < old_size; ++j) {
 			uint32_t u2 = old[j];
 			if (pairs[i].id == u2)
 				continue;
