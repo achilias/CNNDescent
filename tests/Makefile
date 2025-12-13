@@ -33,8 +33,12 @@ EXEC3 := util_test
 OBJS3 := utilities.o $(patsubst $(SRC)/%.c,%.o, $(wildcard $(SRC)/*.c))
 OBJ3  := $(patsubst %,$(BIN_DIR)/%,$(OBJS3))
 
+EXEC4 := benchmark
+OBJS4 := benchmark.o $(patsubst $(SRC)/%.c,%.o, $(wildcard $(SRC)/*.c))
+OBJ4  := $(patsubst %,$(BIN_DIR)/%,$(OBJS4))
 
-all: $(EXEC1) $(EXEC2) $(EXEC3)
+
+all: $(EXEC1) $(EXEC2) $(EXEC3) $(EXEC4)
 
 
 
@@ -48,6 +52,10 @@ $(EXEC2): $(OBJ2)
 	@$(CC) -o $(BUILD_DIR)/$@ $^ $(LIB_FLAGS)
 
 $(EXEC3): $(OBJ3)
+	@$(MAKE) build_dir
+	@$(CC) -o $(BUILD_DIR)/$@ $^ $(LIB_FLAGS)
+
+$(EXEC4): $(OBJ4)
 	@$(MAKE) build_dir
 	@$(CC) -o $(BUILD_DIR)/$@ $^ $(LIB_FLAGS)
 
