@@ -4,11 +4,7 @@
 #include "knngraph.h"
 #include "vector.h"
 
-void import_dataset(KnnArgs *args);
-
 int cmp_ids(Neighbor a, Neighbor b);
-
-bool parse_args(int argc, const char **argv, KnnArgs *args);
 
 float manhattan_dist(float *f1, float *f2, uint32_t dim);
 
