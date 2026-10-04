@@ -30,6 +30,24 @@ float optimized_euclidean(float *f1, float *f2, uint32_t dim) {
 	return f1[dim] + f2[dim] - 2.0 * dot_product(f1, f2, dim);
 }
 
+/* Allocate adjacency lists lazily and reuse them when rebuilding a graph. */
+void graph_init_neighbors(KNNGraph graph) {
+	for (size_t i = 0; i < graph->points; ++i) {
+		Neighbor *neighbors = graph->neighbors[i];
+		if (neighbors != NULL && vector_cap(neighbors) != graph->k) {
+			omp_destroy_lock(vector_lock(neighbors));
+			vector_destroy(neighbors);
+			neighbors = NULL;
+		}
+		if (neighbors == NULL) {
+			neighbors = vector_create(Neighbor, graph->k);
+			omp_init_lock(vector_lock(neighbors));
+			graph->neighbors[i] = neighbors;
+		}
+		vector_set_size(neighbors, 0);
+	}
+}
+
 
 void graph_init_rp(KNNGraph graph, uint32_t n_trees) {
 
@@ -37,10 +55,7 @@ void graph_init_rp(KNNGraph graph, uint32_t n_trees) {
 										 graph->points, graph->dim, 
 										 graph->k);
 
-	for (size_t i = 0UL; i < graph->points; ++i) {
-		graph->neighbors[i] = vector_create(Neighbor, graph->k);
-		omp_init_lock(vector_lock(graph->neighbors[i]));
-	}
+	graph_init_neighbors(graph);
 
 	# pragma omp parallel for num_threads(n_threads)
 	for (size_t tree_i = 0UL; tree_i < n_trees; ++tree_i) {
@@ -78,10 +93,7 @@ void graph_init_rp(KNNGraph graph, uint32_t n_trees) {
 
 /* Initialize a graph randomly, with K edges per vertex */
 void graph_init(KNNGraph graph) {
-	for (size_t i = 0UL; i < graph->points; ++i) {
-		graph->neighbors[i] = vector_create(Neighbor, graph->k);
-		omp_init_lock(vector_lock(graph->neighbors[i]));
-	}
+	graph_init_neighbors(graph);
 
 	# pragma omp parallel for simd num_threads(n_threads)
 	for (size_t i = 0UL; i < graph->points; ++i) {

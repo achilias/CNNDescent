@@ -10,6 +10,8 @@ float manhattan_dist(float *f1, float *f2, uint32_t dim);
 
 float euclidean_dist(float *f1, float *f2, uint32_t dim);
 
+void graph_init_neighbors(KNNGraph graph);
+
 void graph_init(KNNGraph graph);
 
 void graph_init_rp(KNNGraph graph, uint32_t n_trees);
