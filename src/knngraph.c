@@ -10,10 +10,8 @@ KNNGraph KNNGraph_create(float **data, DistanceFunc dist, uint32_t k,
     CHECK_CALL(graph = malloc(sizeof(*graph)), NULL);
 	
 	graph->neighbors = vector_create(Neighbor*, VEC_MIN_CAP);
-	for (size_t i = 0UL; i < points; i++) {
-		Neighbor *tmp = malloc(k * sizeof(Neighbor));
-		vector_insert(graph->neighbors, tmp);
-	}
+	for (size_t i = 0UL; i < points; i++)
+		vector_insert(graph->neighbors, NULL);
 	
 	graph->k = k;
 	graph->dim = dim;
@@ -28,8 +26,7 @@ KNNGraph KNNGraph_create(float **data, DistanceFunc dist, uint32_t k,
 void KNNGraph_add_point(KNNGraph graph, float *point) {
 	float *tmp = malloc((graph->dim + 1) * sizeof(float));
 	vector_insert(graph->data, tmp);
-	Neighbor *tmp_ = malloc(sizeof(Neighbor*));
-	vector_insert(graph->neighbors, tmp_);
+	vector_insert(graph->neighbors, NULL);
 
 	memcpy(graph->data[graph->points], point, graph->dim * sizeof(float));
 	graph->data[graph->points][graph->dim] = dot_product(point, point, graph->dim);
@@ -38,10 +35,7 @@ void KNNGraph_add_point(KNNGraph graph, float *point) {
 
 /* Build graph by exhaustively computing distances between all pairs of points  */
 void KNNGraph_bruteforce(KNNGraph graph) {
-	for (size_t i = 0UL; i < graph->points; ++i) {
-		graph->neighbors[i] = vector_create(Neighbor, graph->k);
-		omp_init_lock(vector_lock(graph->neighbors[i]));
-	}
+	graph_init_neighbors(graph);
 
 	# pragma omp parallel for num_threads(n_threads)
 	for (size_t i = 0UL; i < graph->points; ++i) {
@@ -57,6 +51,24 @@ void KNNGraph_bruteforce(KNNGraph graph) {
 			omp_unset_lock(vector_lock(graph->neighbors[j]));
 		}
 	}
+}
+
+/* Apply one row of comparisons, taking the source lock only once. */
+static uint32_t update_neighbors(KNNGraph graph, uint32_t id, Neighbor *comparisons) {
+	uint32_t updates = 0;
+	omp_set_lock(vector_lock(graph->neighbors[id]));
+	for (size_t i = 0; i < vector_size(comparisons); ++i)
+		updates += vector_sorted_insert(graph->neighbors[id], comparisons[i]);
+	omp_unset_lock(vector_lock(graph->neighbors[id]));
+
+	for (size_t i = 0; i < vector_size(comparisons); ++i) {
+		Neighbor entry = comparisons[i];
+		omp_set_lock(vector_lock(graph->neighbors[entry.id]));
+		updates += vector_sorted_insert(graph->neighbors[entry.id],
+			((Neighbor){ .id = id, .dist = entry.dist, .flag = true }));
+		omp_unset_lock(vector_lock(graph->neighbors[entry.id]));
+	}
+	return updates;
 }
 
 void KNNGraph_nndescent(KNNGraph graph, float precision, float sample_rate, uint32_t n_trees) {
@@ -85,40 +97,34 @@ void KNNGraph_nndescent(KNNGraph graph, float precision, float sample_rate, uint
 
 		collect_sets(graph, old, new, sample_rate);
 		get_reverse(graph, old, new, old_r, new_r, sample_rate);
-		# pragma omp parallel for simd num_threads(n_threads)\
-			reduction(+:c, sim), schedule(nonmonotonic:dynamic, 100)
-		for (size_t v = 0UL; v < graph->points; ++v) {
-			Pair *pairs = collect_pairs(old[v], new[v]);
-
-			for (size_t i = 0UL; i < vector_size(new[v]); ++i) {
-				for (size_t j = 0UL; j < vector_size(pairs[i].neighbors); ++j)
-					pairs[i].neighbors[j].dist = graph->dist(graph->data[pairs[i].id],
-															 graph->data[pairs[i].neighbors[j].id],
-															 graph->dim);
-			}
-
-			for (size_t i = 0UL; i < vector_size(new[v]); ++i) {
-				sim += vector_size(pairs[i].neighbors);
-				omp_set_lock(vector_lock(graph->neighbors[pairs[i].id]));
-				for (size_t j = 0UL; j < vector_size(pairs[i].neighbors); ++j) {
-					c += vector_sorted_insert(graph->neighbors[pairs[i].id],
-											 ((Neighbor) {.id = pairs[i].neighbors[j].id, 
-											              .dist = pairs[i].neighbors[j].dist, 
-														  .flag = true}));
+		# pragma omp parallel num_threads(n_threads) reduction(+:c, sim)
+		{
+			/* Reuse one O(k) row buffer per worker instead of O(k^2) pair lists. */
+			Neighbor *comparisons = vector_create(Neighbor, VEC_MIN_CAP);
+			# pragma omp for schedule(nonmonotonic:dynamic, 100)
+			for (size_t v = 0; v < graph->points; ++v) {
+				for (size_t i = 0; i < vector_size(new[v]); ++i) {
+					uint32_t id = new[v][i];
+					vector_set_size(comparisons, 0);
+					for (size_t j = 0; j < vector_size(new[v]); ++j) {
+						uint32_t other = new[v][j];
+						if (id >= other)
+							continue;
+						float dist = graph->dist(graph->data[id], graph->data[other], graph->dim);
+						vector_insert(comparisons, ((Neighbor){ .id = other, .dist = dist, .flag = true }));
+					}
+					for (size_t j = 0; j < vector_size(old[v]); ++j) {
+						uint32_t other = old[v][j];
+						if (id == other)
+							continue;
+						float dist = graph->dist(graph->data[id], graph->data[other], graph->dim);
+						vector_insert(comparisons, ((Neighbor){ .id = other, .dist = dist, .flag = true }));
+					}
+					sim += vector_size(comparisons);
+					c += update_neighbors(graph, id, comparisons);
 				}
-				omp_unset_lock(vector_lock(graph->neighbors[pairs[i].id]));
-
-				for (size_t j = 0UL; j < vector_size(pairs[i].neighbors); ++j) {
-					omp_set_lock(vector_lock(graph->neighbors[pairs[i].neighbors[j].id]));
-					c += vector_sorted_insert(graph->neighbors[pairs[i].neighbors[j].id],
-											 ((Neighbor) {.id = pairs[i].id, 
-											              .dist = pairs[i].neighbors[j].dist, 
-														  .flag = true}));
-					omp_unset_lock(vector_lock(graph->neighbors[pairs[i].neighbors[j].id]));
-				}
-				vector_destroy(pairs[i].neighbors);
 			}
-			free(pairs);
+			vector_destroy(comparisons);
 		}
 		graph->similarity_comparisons += sim;
 
@@ -205,9 +211,9 @@ KNNGraph KNNGraph_import_graph(char *graph_file, float **data, DistanceFunc dist
 
 
 	KNNGraph import_graph = KNNGraph_create(data, dist, k, dim, n);
+	graph_init_neighbors(import_graph);
 	for (uint32_t i = 0; i < n; ++i) {
         Neighbor entry = {0};
-		import_graph->neighbors[i] = vector_create(Neighbor, import_graph->k);
 		for (uint32_t j = 0; j < k; ++j) {
 			CHECK_CALL(read(fd, &entry.id, sizeof(uint32_t)), -1);
 			CHECK_CALL(read(fd, &entry.dist, sizeof(float)), -1);
@@ -258,8 +264,10 @@ float KNNGraph_recall(KNNGraph graph, KNNGraph ground_truth) {
 
 void KNNGraph_destroy(KNNGraph graph) {
 	for (size_t i = 0UL; i < graph->points; ++i)
-		if (graph->neighbors[i] != NULL)
+		if (graph->neighbors[i] != NULL) {
+			omp_destroy_lock(vector_lock(graph->neighbors[i]));
 			vector_destroy(graph->neighbors[i]);
+		}
 
 	vector_destroy(graph->neighbors);
 	free(graph);

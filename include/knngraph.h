@@ -16,6 +16,9 @@ struct KNNGraph_ {
 
 typedef struct KNNGraph_* KNNGraph;
 
+/* Neighbor lists are NULL until a build initializes them. Rebuilding reuses
+ * existing lists when k is unchanged.
+ */
 KNNGraph KNNGraph_create(float **data, DistanceFunc dist, uint32_t k, 
 	                     uint32_t dim, uint32_t points);
 
