@@ -16,6 +16,9 @@ void graph_init_rp(KNNGraph graph, uint32_t n_trees);
 
 Neighbor **get_reverse_neighbors(KNNGraph graph);
 
+/* Sample without replacement in place, retaining capacity for reuse.
+ * Requests at least as large as the vector leave it unchanged.
+ */
 void sample(uint32_t **vec, uint32_t size, uint32_t seed);
 
 void collect_sets(KNNGraph graph, uint32_t **old, uint32_t **new_, float sample_rate);
