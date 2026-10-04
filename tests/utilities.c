@@ -132,6 +132,60 @@ void test_sample(void) {
 	vector_destroy(vec);
 }
 
+void test_sample_in_place(void) {
+	const uint32_t lengths[] = { 0, 1, 2, 20, 1000 };
+	const uint32_t seeds[] = { 0, 1, 42, UINT32_MAX };
+
+	for (size_t n = 0; n < ARRAY_SIZE(lengths); ++n) {
+		uint32_t length = lengths[n];
+		uint32_t cap = length ? length + VEC_MIN_CAP : 0;
+		uint32_t sizes[] = { 0, 1, length / 2, length ? length - 1 : 0,
+		                     length, length + 1, UINT32_MAX };
+		for (size_t s = 0; s < ARRAY_SIZE(sizes); ++s) {
+			for (size_t seed = 0; seed < ARRAY_SIZE(seeds); ++seed) {
+				uint32_t *vec = vector_create(uint32_t, cap);
+				uint32_t *repeat = vector_create(uint32_t, cap);
+				uint32_t *original = vec;
+				for (uint32_t i = 0; i < length; ++i) {
+					vector_insert(vec, 3 * i + 7);
+					vector_insert(repeat, 3 * i + 7);
+				}
+
+				sample(&vec, sizes[s], seeds[seed]);
+				sample(&repeat, sizes[s], seeds[seed]);
+				uint32_t expected = sizes[s] < length ? sizes[s] : length;
+				TEST_CHECK(vec == original);
+				TEST_CHECK(vector_cap(vec) == cap);
+				TEST_ASSERT(vector_size(vec) == expected);
+				TEST_ASSERT(vector_size(repeat) == expected);
+				TEST_CHECK(memcmp(vec, repeat, expected * sizeof(*vec)) == 0);
+
+				uint8_t *seen = BITSET_CREATE(length + 1);
+				TEST_ASSERT(seen != NULL);
+				for (uint32_t i = 0; i < expected; ++i) {
+					TEST_ASSERT(vec[i] >= 7 && (vec[i] - 7) % 3 == 0);
+					uint32_t index = (vec[i] - 7) / 3;
+					TEST_ASSERT(index < length);
+					TEST_CHECK(!BITSET_CHECK(seen, index));
+					BITSET_SET(seen, index);
+					if (sizes[s] >= length)
+						TEST_CHECK(vec[i] == 3 * i + 7);
+				}
+
+				/* Reverse sets are cleared and refilled each NN-Descent iteration. */
+				vector_set_size(vec, 0);
+				for (uint32_t i = 0; i < length; ++i)
+					vector_insert(vec, 3 * i + 7);
+				TEST_CHECK(vec == original);
+				TEST_CHECK(vector_size(vec) == length);
+				free(seen);
+				vector_destroy(repeat);
+				vector_destroy(vec);
+			}
+		}
+	}
+}
+
 void test_collect_pairs(void) {
 	uint32_t old[] = { 1, 2, 3 };
 	uint32_t new[] = { 4, 5, 6 };
@@ -192,6 +246,7 @@ TEST_LIST = {
     { "test_graph_init",        test_graph_init        },
     { "test_reverse_neighbors", test_reverse_neighbors },
 	{ "test_sample",			test_sample            },
+	{ "test_sample_in_place",   test_sample_in_place   },
 	{ "test_collect_pairs",		test_collect_pairs     },
 	{ "test_euclidean",         test_euclidean         },
     {  NULL,                    NULL                   }

@@ -1,5 +1,4 @@
 #include "utils.h"
-#include "bitset.h"
 #include "rp_tree.h"
 
 uint32_t n_threads = 1;
@@ -140,24 +139,18 @@ Neighbor *get_knearest(KNNGraph graph, float *point) {
 
 
 void sample(uint32_t **vec, uint32_t size, uint32_t seed) {
-	if (vector_size(*vec) <= size)
+	uint32_t length = vector_size(*vec);
+	if (length <= size)
 		return;
 
-	int size__ = vector_size(*vec);
-	uint32_t *sampled = vector_create(uint32_t, size__);
-	uint8_t *bitset = BITSET_CREATE(vector_size(*vec));
-	while (vector_size(sampled) < size) {
-		uint32_t i = rand_r(&seed) % vector_size(*vec);
-		while (BITSET_CHECK(bitset, i))
-			i = rand_r(&seed) % vector_size(*vec);
-
-		BITSET_SET(bitset, i);
-		vector_insert(sampled, (*vec)[i]);
+	/* Partial Fisher-Yates shuffle: select from the remaining suffix. */
+	for (uint32_t i = 0; i < size; ++i) {
+		uint32_t j = i + rand_r(&seed) % (length - i);
+		uint32_t tmp = (*vec)[i];
+		(*vec)[i] = (*vec)[j];
+		(*vec)[j] = tmp;
 	}
-	free(bitset);
-
-	vector_destroy(*vec);
-	*vec = sampled;
+	vector_set_size(*vec, size);
 }
 
 
